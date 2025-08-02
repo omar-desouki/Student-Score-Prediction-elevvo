@@ -402,22 +402,6 @@ def explore_target_transformations(
         results["transform_params"]["Log"] = {"min_score": min_score_train}
         print(f"Log skewness (TRAIN): {log_train.skew():.3f}")
 
-    # # 3. Quantile transformation
-    # try:
-    #     qt = QuantileTransformer(
-    #         output_distribution="normal", random_state=random_state
-    #     )
-    #     quantile_train = qt.fit_transform(
-    #         df_train[target_col].values.reshape(-1, 1)
-    #     ).flatten()
-    #     results["transformations"]["Quantile (Normal)"] = pd.Series(quantile_train)
-    #     results["transform_params"]["Quantile (Normal)"] = {"transformer": qt}
-    #     print(
-    #         f"Quantile transformation skewness (TRAIN): {pd.Series(quantile_train).skew():.3f}"
-    #     )
-    # except Exception as e:
-    #     print(f"Quantile transformation failed: {e}")
-
     # Find best transformation
     if results["transformations"]:
         best_transform = min(
@@ -473,88 +457,6 @@ def explore_target_transformations(
     if show_results:
         print(f"results = {results}")
 
-    # return results
-
-
-def apply_transformation_to_sets(df_train, df_test, target_col, method, params):
-    """
-    Apply transformation to both train and test sets using parameters from train set.
-    """
-    import numpy as np
-    from scipy.special import inv_boxcox
-    from scipy.stats import yeojohnson
-
-    df_train_transformed = df_train.copy()
-    df_test_transformed = df_test.copy()
-
-    if method == "Square Root":
-        df_train_transformed[target_col] = np.sqrt(df_train[target_col])
-        df_test_transformed[target_col] = np.sqrt(df_test[target_col])
-
-    elif method == "Log":
-        min_score = params["min_score"]
-        df_train_transformed[target_col] = np.log(df_train[target_col] + 1 - min_score)
-        df_test_transformed[target_col] = np.log(df_test[target_col] + 1 - min_score)
-
-    # elif method == "Box-Cox":
-    #     lambda_param = params["lambda"]
-    #     from scipy.special import boxcox
-
-    #     df_train_transformed[target_col] = boxcox(df_train[target_col], lambda_param)
-    #     df_test_transformed[target_col] = boxcox(df_test[target_col], lambda_param)
-
-    # elif method == "Yeo-Johnson":
-    #     lambda_param = params["lambda"]
-    #     df_train_transformed[target_col] = yeojohnson(
-    #         df_train[target_col], lmbda=lambda_param
-    #     )
-    #     df_test_transformed[target_col] = yeojohnson(
-    #         df_test[target_col], lmbda=lambda_param
-    #     )
-
-    # elif method == "Quantile (Normal)":
-    #     transformer = params["transformer"]
-    #     # Transform train
-    #     df_train_transformed[target_col] = transformer.transform(
-    #         df_train[target_col].values.reshape(-1, 1)
-    #     ).flatten()
-    #     # Transform test using same fitted transformer
-    #     df_test_transformed[target_col] = transformer.transform(
-    #         df_test[target_col].values.reshape(-1, 1)
-    #     ).flatten()
-
-    return df_train_transformed, df_test_transformed
-
-
-def get_inverse_transform_function(method, params):
-    """
-    Get function to inverse transform predictions back to original scale.
-    """
-    import numpy as np
-    from scipy.special import inv_boxcox
-    from scipy.stats import yeojohnson
-
-    if method == "Square Root":
-        return lambda x: x**2
-
-    elif method == "Log":
-        min_score = params["min_score"]
-        return lambda x: np.exp(x) - 1 + min_score
-
-    # elif method == "Box-Cox":
-    #     lambda_param = params["lambda"]
-    #     return lambda x: inv_boxcox(x, lambda_param)
-
-    # elif method == "Yeo-Johnson":
-    #     lambda_param = params["lambda"]
-    #     return lambda x: yeojohnson(x, lmbda=lambda_param)
-
-    # elif method == "Quantile (Normal)":
-    #     transformer = params["transformer"]
-    #     return lambda x: transformer.inverse_transform(x.reshape(-1, 1)).flatten()
-
-    return lambda x: x  # Identity function as fallback
-
 
 def train_and_evaluate_model(
     X,
@@ -562,23 +464,10 @@ def train_and_evaluate_model(
     model_type="compare",
     test_size=0.2,
     random_state=42,
-    apply_target_transform=None,  # NEW PARAMETER: None/False = no transform, dict = apply transform
-    # show_feature_importance=False,
+    apply_target_transform=None,
 ):
     """
     Train a model and evaluate its performance with optional target transformation
-
-    Args:
-        X: Feature matrix
-        y: Target variable
-        model_type: Type of model to train ('compare', 'linear', 'ridge', etc.)
-        test_size: Proportion of data to use for testing
-        random_state: Random seed for reproducibility
-        apply_target_transform: None/False for no transform, or dict with keys:
-                              {'method': 'Log', 'params': {'min_score': 55}}
-
-    Returns:
-        dict: Dictionary containing model, predictions, and metrics
     """
 
     # Split the data
@@ -587,386 +476,318 @@ def train_and_evaluate_model(
     )
 
     # Handle target transformation
-    transform_applied = False
     inverse_transform_func = None
+    y_test_original = y_test.copy()
 
     if apply_target_transform:
-        transform_method = apply_target_transform.get("method")
-        transform_params = apply_target_transform.get("params")
+        method = apply_target_transform.get("method")
+        params = apply_target_transform.get("params", {})
 
-        if transform_method and transform_params:
-            print(f"🔄 Applying {transform_method} transformation to target...")
+        if method == "Square Root":
+            y_train = np.sqrt(y_train)
+            y_test_transformed = np.sqrt(y_test)
+            inverse_transform_func = lambda x: x**2
 
-            # Apply transformation to target
-            if transform_method == "Square Root":
-                y_train_transformed = np.sqrt(y_train)
-                y_test_transformed = np.sqrt(y_test)
+        elif method == "Log":
+            min_score = params.get("min_score", y_train.min())
+            y_train = np.log(y_train + 1 - min_score)
+            y_test_transformed = np.log(y_test + 1 - min_score)
+            inverse_transform_func = lambda x: np.exp(x) + min_score - 1
 
-            elif transform_method == "Log":
-                min_score = transform_params["min_score"]
-                y_train_transformed = np.log(y_train + 1 - min_score)
-                y_test_transformed = np.log(y_test + 1 - min_score)
+        print(f"Applied {method} transformation to target")
 
-            # elif transform_method == "Box-Cox":
-            #     from scipy.special import boxcox
+    # Define models
+    models = {
+        "Linear": LinearRegression(),
+        "Ridge": Ridge(alpha=1.0, random_state=random_state),
+        "Random Forest": RandomForestRegressor(
+            n_estimators=100, random_state=random_state
+        ),
+        "XGBoost": XGBRegressor(n_estimators=100, random_state=random_state),
+    }
 
-            #     lambda_param = transform_params["lambda"]
-            #     y_train_transformed = boxcox(y_train, lambda_param)
-            #     y_test_transformed = boxcox(y_test, lambda_param)
+    if model_type != "compare":
+        models = {model_type: models.get(model_type, LinearRegression())}
 
-            # elif transform_method == "Yeo-Johnson":
-            #     from scipy.stats import yeojohnson
+    # Train and evaluate models
+    best_model_name = None
+    best_r2 = -float("inf")
 
-            #     lambda_param = transform_params["lambda"]
-            #     y_train_transformed = yeojohnson(y_train, lmbda=lambda_param)
-            #     y_test_transformed = yeojohnson(y_test, lmbda=lambda_param)
-
-            # elif transform_method == "Quantile (Normal)":
-            #     transformer = transform_params["transformer"]
-            #     y_train_transformed = transformer.transform(
-            #         y_train.values.reshape(-1, 1)
-            #     ).flatten()
-            #     y_test_transformed = transformer.transform(
-            #         y_test.values.reshape(-1, 1)
-            #     ).flatten()
-
-            else:
-                print(f"⚠️ Unknown transformation method: {transform_method}")
-                y_train_transformed = y_train
-                y_test_transformed = y_test
-
-            # Get inverse transform function
-            inverse_transform_func = get_inverse_transform_function(
-                transform_method, transform_params
-            )
-            transform_applied = True
-
-            # Replace original targets with transformed ones for training
-            y_train = y_train_transformed
-            y_test = y_test_transformed
-
-            print(f"✅ Transformation applied. Training on transformed target.")
-
-    # Model selection
-    if model_type == "linear":
-        model = LinearRegression()
-
-    elif model_type == "ridge":
-        model = Ridge(alpha=1.0, random_state=random_state)
-
-    elif model_type == "lasso":
-        model = Lasso(alpha=0.1, random_state=random_state)
-
-    elif model_type == "elastic":
-        model = ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=random_state)
-
-    elif model_type == "rf":
-        model = RandomForestRegressor(n_estimators=100, random_state=random_state)
-
-    elif model_type == "xgb":
-        model = XGBRegressor(n_estimators=100, random_state=random_state)
-
-    elif model_type == "svr":
-        model = SVR(kernel="rbf", C=1.0)
-
-    elif model_type == "compare":
-        models = {
-            "Linear": LinearRegression(),
-            "Ridge": Ridge(alpha=1.0, random_state=random_state),
-            "Random Forest": RandomForestRegressor(
-                n_estimators=100, random_state=random_state
-            ),
-            "XGBoost": XGBRegressor(n_estimators=100, random_state=random_state),
-        }
-
-        results = {}
-        best_model = None
-        best_r2 = -float("inf")
-
-        for name, model in models.items():
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
-
-            # If target was transformed, inverse transform for evaluation
-            if transform_applied and inverse_transform_func:
-                # Inverse transform for evaluation in original scale
-                y_pred_original = inverse_transform_func(y_pred)
-                y_test_original = inverse_transform_func(y_test)
-
-                # Calculate metrics on original scale
-                r2 = r2_score(y_test_original, y_pred_original)
-                mse = mean_squared_error(y_test_original, y_pred_original)
-                rmse = np.sqrt(mse)
-                mae = mean_absolute_error(y_test_original, y_pred_original)
-
-                results[name] = {
-                    "model": model,
-                    "r2": r2,
-                    "mse": mse,
-                    "rmse": rmse,
-                    "mae": mae,
-                    "y_pred_original": y_pred_original,
-                    "y_pred_transformed": y_pred_transformed,
-                    "transform_applied": True,
-                }
-
-                print(f"\n{name} Results:")
-                print(f"R² Score (Original Scale): {r2:.4f}")
-                print(f"RMSE (Original Scale): {rmse:.4f}")
-                print(f"MAE (Original Scale): {mae:.4f}")
-
-            else:
-                # Standard evaluation without transformation
-                r2 = r2_score(y_test, y_pred)
-                mse = mean_squared_error(y_test, y_pred)
-                rmse = np.sqrt(mse)
-                mae = mean_absolute_error(y_test, y_pred)
-
-                results[name] = {
-                    "model": model,
-                    "r2": r2,
-                    "mse": mse,
-                    "rmse": rmse,
-                    "mae": mae,
-                    "y_pred": y_pred,
-                    "transform_applied": False,
-                }
-
-                print(f"\n{name} Results:")
-                print(f"R² Score: {r2:.4f}")
-                print(f"RMSE: {rmse:.4f}")
-                print(f"MAE: {mae:.4f}")
-
-            if r2 > best_r2:
-                best_r2 = r2
-                best_model = name
-
-        print(f"\n🏆 Best Model: {best_model} (R² = {best_r2:.4f})")
-
-        if transform_applied:
-            print(
-                f"📝 Note: Metrics calculated on original scale after inverse transformation"
-            )
-
-        # return results
-        return
-
-    # Single model training
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-
-    # Handle target transformation for single model
-    if transform_applied and inverse_transform_func:
-        y_pred_original = inverse_transform_func(y_pred)
-        y_test_original = inverse_transform_func(y_test)
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
 
         # Calculate metrics on original scale
-        mse = mean_squared_error(y_test_original, y_pred_original)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test_original, y_pred_original)
-        r2 = r2_score(y_test_original, y_pred_original)
+        if inverse_transform_func:
+            y_pred_original = inverse_transform_func(y_pred)
+            y_test_eval = y_test_original
+        else:
+            y_pred_original = y_pred
+            y_test_eval = y_test
 
-        print("\n" + "=" * 50)
-        print("PERFORMANCE")
-        print("=" * 50)
-        print(f"R² Score (Original Scale): {r2:.4f}")
-        print(f"Mean Squared Error (Original Scale): {mse:.4f}")
-        print(f"Root Mean Squared Error (Original Scale): {rmse:.4f}")
-        print(f"Mean Absolute Error (Original Scale): {mae:.4f}")
-        print(f"📝 Note: Primary metrics calculated on original scale")
+        r2 = r2_score(y_test_eval, y_pred_original)
+        rmse = np.sqrt(mean_squared_error(y_test_eval, y_pred_original))
+        mae = mean_absolute_error(y_test_eval, y_pred_original)
+
+        print(f"\n{name} Results:")
+        print(f"R² Score: {r2:.4f}")
+        print(f"RMSE: {rmse:.4f}")
+        print(f"MAE: {mae:.4f}")
+
+        if r2 > best_r2:
+            best_r2 = r2
+            best_model_name = name
+
+    if model_type == "compare":
+        print(f"\n🏆 Best Model: {best_model_name} (R² = {best_r2:.4f})")
+        if inverse_transform_func:
+            print(
+                "📝 Metrics calculated on original scale after inverse transformation"
+            )
+
+
+def plot_two_columns(df, col1, col2, plot_type="auto", figsize=(12, 8), title=None):
+    """
+    Create visualizations for two columns in a dataframe
+
+    Args:
+        df: DataFrame containing the data
+        col1: First column name
+        col2: Second column name
+        plot_type: Type of plot ('auto', 'scatter', 'box', 'violin', 'bar', 'heatmap')
+        figsize: Figure size tuple
+        title: Custom title for the plot
+
+    Returns:
+        None (displays the plot)
+    """
+
+    # Check if columns exist
+    if col1 not in df.columns or col2 not in df.columns:
+        print(f"Error: One or both columns not found in dataframe")
+        return
+
+    # Determine data types
+    col1_numeric = pd.api.types.is_numeric_dtype(df[col1])
+    col2_numeric = pd.api.types.is_numeric_dtype(df[col2])
+
+    # Auto-select plot type based on data types
+    if plot_type == "auto":
+        if col1_numeric and col2_numeric:
+            plot_type = "scatter"
+        elif col1_numeric or col2_numeric:
+            plot_type = "box"
+        else:
+            plot_type = "heatmap"
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if plot_type == "scatter":
+        # Scatter plot for two numeric variables
+        plt.scatter(df[col1], df[col2], alpha=0.6)
+        plt.xlabel(col1)
+        plt.ylabel(col2)
+
+        # Add correlation coefficient
+        corr = df[col1].corr(df[col2])
+        plt.text(
+            0.05,
+            0.95,
+            f"Correlation: {corr:.3f}",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round", facecolor="wheat"),
+        )
+
+    elif plot_type == "box":
+        # Box plot for categorical vs numeric
+        if col1_numeric and not col2_numeric:
+            sns.boxplot(data=df, x=col2, y=col1)
+            plt.xticks(rotation=45)
+        else:
+            sns.boxplot(data=df, x=col1, y=col2)
+            plt.xticks(rotation=45)
+
+    elif plot_type == "violin":
+        # Violin plot for categorical vs numeric
+        if col1_numeric and not col2_numeric:
+            sns.violinplot(data=df, x=col2, y=col1)
+            plt.xticks(rotation=45)
+        else:
+            sns.violinplot(data=df, x=col1, y=col2)
+            plt.xticks(rotation=45)
+
+    elif plot_type == "bar":
+        # Bar plot for categorical data
+        if col1_numeric:
+            # Group by col2 and get mean of col1
+            grouped = df.groupby(col2)[col1].mean().sort_values(ascending=False)
+            grouped.plot(kind="bar")
+            plt.ylabel(f"Mean {col1}")
+            plt.xlabel(col2)
+        else:
+            # Group by col1 and get mean of col2
+            grouped = df.groupby(col1)[col2].mean().sort_values(ascending=False)
+            grouped.plot(kind="bar")
+            plt.ylabel(f"Mean {col2}")
+            plt.xlabel(col1)
+        plt.xticks(rotation=45)
+
+    elif plot_type == "heatmap":
+        # Heatmap for categorical vs categorical
+        crosstab = pd.crosstab(df[col1], df[col2])
+        sns.heatmap(crosstab, annot=True, fmt="d", cmap="Blues")
+        plt.xlabel(col2)
+        plt.ylabel(col1)
+
+    # Set title
+    if title:
+        plt.title(title)
+    else:
+        plt.title(f"{col1} vs {col2}")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def train_polynomial_regression(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    apply_target_transform=None,
+    grid_search=True,
+    cv_folds=5,
+):
+    """
+    Train polynomial regression with optional target transformation and hyperparameter tuning
+
+    Args:
+        X: Feature matrix
+        y: Target variable
+        test_size: Proportion of data for testing
+        random_state: Random seed for reproducibility
+        apply_target_transform: Dict with transformation config {'method': 'Log'/'Square Root', 'params': {}}
+        grid_search: Whether to perform grid search for best hyperparameters
+        cv_folds: Number of cross-validation folds for grid search
+
+    Returns:
+        dict: Results containing best model, metrics, and hyperparameters
+    """
+    from sklearn.preprocessing import PolynomialFeatures
+    from sklearn.pipeline import Pipeline
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.linear_model import Ridge
+
+    print("🔄 Training Polynomial Regression Model")
+    print("=" * 50)
+
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+
+    # Handle target transformation
+    inverse_transform_func = None
+    y_test_original = y_test.copy()
+
+    if apply_target_transform:
+        method = apply_target_transform.get("method")
+        params = apply_target_transform.get("params", {})
+
+        if method == "Square Root":
+            y_train = np.sqrt(y_train)
+            inverse_transform_func = lambda x: x**2
+
+        elif method == "Log":
+            min_score = params.get("min_score", y_train.min())
+            y_train = np.log(y_train + 1 - min_score)
+            inverse_transform_func = lambda x: np.exp(x) + min_score - 1
+
+        print(f"✅ Applied {method} transformation to target")
+
+    # Create polynomial regression pipeline
+    poly_pipeline = Pipeline(
+        [
+            ("poly", PolynomialFeatures(include_bias=False)),
+            ("ridge", Ridge(random_state=random_state)),
+        ]
+    )
+
+    if grid_search:
+        # Define parameter grid for grid search
+        param_grid = {
+            "poly__degree": [1, 2, 3, 4],
+            "ridge__alpha": [0.1, 1.0, 10.0, 100.0],
+        }
+
+        print(f"🔍 Performing Grid Search with {cv_folds}-fold CV...")
+        print(
+            f"Parameter combinations to test: {len(param_grid['poly__degree']) * len(param_grid['ridge__alpha'])}"
+        )
+
+        # Perform grid search
+        grid_search_cv = GridSearchCV(
+            poly_pipeline, param_grid, cv=cv_folds, scoring="r2", n_jobs=-1, verbose=1
+        )
+
+        grid_search_cv.fit(X_train, y_train)
+        best_model = grid_search_cv.best_estimator_
+        best_params = grid_search_cv.best_params_
+        best_cv_score = grid_search_cv.best_score_
+
+        print(f"✅ Best CV R² Score: {best_cv_score:.4f}")
+        print(f"✅ Best Parameters: {best_params}")
 
     else:
-        # Standard evaluation
-        mse = mean_squared_error(y_test, y_pred)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
+        # Use default parameters
+        best_model = poly_pipeline
+        best_params = {"poly__degree": 2, "ridge__alpha": 1.0}
+        best_cv_score = None
 
-        print("\n" + "=" * 50)
-        print("PERFORMANCE")
-        print("=" * 50)
-        print(f"R² Score: {r2:.4f}")
-        print(f"Mean Squared Error: {mse:.4f}")
-        print(f"Root Mean Squared Error: {rmse:.4f}")
-        print(f"Mean Absolute Error: {mae:.4f}")
+        print("📝 Using default parameters (degree=2, alpha=1.0)")
+        best_model.fit(X_train, y_train)
 
-    # return model
-    return
+    # Make predictions
+    y_pred = best_model.predict(X_test)
 
+    # Calculate metrics on original scale
+    if inverse_transform_func:
+        y_pred_original = inverse_transform_func(y_pred)
+        y_test_eval = y_test_original
+        scale_note = " (Original Scale)"
+    else:
+        y_pred_original = y_pred
+        y_test_eval = y_test
+        scale_note = ""
 
-# def train_with_transformation_results(
-#     X, y, transformation_results, model_type="compare", test_size=0.2, random_state=42
-# ):
-#     """
-#     Convenience function to use transformation results from explore_target_transformations()
+    # Calculate evaluation metrics
+    r2 = r2_score(y_test_eval, y_pred_original)
+    rmse = np.sqrt(mean_squared_error(y_test_eval, y_pred_original))
+    mae = mean_absolute_error(y_test_eval, y_pred_original)
 
-#     Args:
-#         X: Feature matrix
-#         y: Original target variable
-#         transformation_results: Results dict from explore_target_transformations()
-#         model_type: Type of model to train
-#         test_size: Test set proportion
-#         random_state: Random seed
+    # Display results
+    print("\n📊 Test Set Performance")
+    print("=" * 30)
+    print(f"R² Score{scale_note}: {r2:.4f}")
+    print(f"RMSE{scale_note}: {rmse:.4f}")
+    print(f"MAE{scale_note}: {mae:.4f}")
 
-#     Returns:
-#         Model results with transformation applied and inverse transformation for evaluation
-#     """
+    if inverse_transform_func:
+        print("📝 Metrics calculated after inverse transformation")
 
-#     best_method = transformation_results["best_transformation"]
-#     transform_params = transformation_results["transform_params"][best_method]
+    # Prepare results dictionary
+    results = {
+        "model": best_model,
+        "best_params": best_params,
+        "best_cv_score": best_cv_score,
+        "test_r2": r2,
+        "test_rmse": rmse,
+        "test_mae": mae,
+        "predictions": y_pred_original,
+        "true_values": y_test_eval,
+        "transformation_applied": apply_target_transform is not None,
+        "inverse_transform_func": inverse_transform_func,
+    }
 
-#     # Create transform config
-#     transform_config = {"method": best_method, "params": transform_params}
-
-#     # Train model with transformation
-#     results = train_and_evaluate_model(
-#         X=X,
-#         y=y,
-#         model_type=model_type,
-#         test_size=test_size,
-#         random_state=random_state,
-#         apply_target_transform=transform_config,
-#     )
-
-#     return results
-
-
-# def train_and_evaluate_model(
-#     X,
-#     y,
-#     model_type="compare",
-#     test_size=0.2,
-#     random_state=42,
-
-#     # show_feature_importance=False,
-# ):
-#     """
-#     Train a Linear Regression model and evaluate its performance
-
-#     Args:
-#         X: Feature matrix
-#         y: Target variable
-#         model_name: Name for the model (for display purposes)
-#         test_size: Proportion of data to use for testing
-#         random_state: Random seed for reproducibility
-
-#     Returns:
-#         dict: Dictionary containing model, predictions, and metrics
-#     """
-
-#     # Split the data
-#     X_train, X_test, y_train, y_test = train_test_split(
-#         X, y, test_size=test_size, random_state=random_state
-#     )
-
-#     # Train the model
-#     # model = LinearRegression()
-#     # model.fit(X_train, y_train)
-#     if model_type == "linear":
-#         model = LinearRegression()
-
-#     elif model_type == "ridge":
-#         model = Ridge(alpha=1.0, random_state=random_state)
-
-#     elif model_type == "lasso":
-#         model = Lasso(alpha=0.1, random_state=random_state)
-
-#     elif model_type == "elastic":
-#         model = ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=random_state)
-
-#     elif model_type == "rf":
-#         model = RandomForestRegressor(n_estimators=100, random_state=random_state)
-
-#     elif model_type == "xgb":
-#         model = XGBRegressor(n_estimators=100, random_state=random_state)
-
-#     elif model_type == "svr":
-#         model = SVR(kernel="rbf", C=1.0)
-
-#     elif model_type == "compare":
-#         models = {
-#             "Linear": LinearRegression(),
-#             "Ridge": Ridge(alpha=1.0, random_state=random_state),
-#             "Random Forest": RandomForestRegressor(
-#                 n_estimators=100, random_state=random_state
-#             ),
-#             "XGBoost": XGBRegressor(n_estimators=100, random_state=random_state),
-#         }
-
-#         results = {}
-#         best_model = None
-#         best_r2 = -float("inf")
-
-#         for name, model in models.items():
-#             model.fit(X_train, y_train)
-#             y_pred = model.predict(X_test)
-
-#             r2 = r2_score(y_test, y_pred)
-#             mse = mean_squared_error(y_test, y_pred)
-#             rmse = np.sqrt(mse)
-#             mae = mean_absolute_error(y_test, y_pred)
-
-#             results[name] = {
-#                 "model": model,
-#                 "r2": r2,
-#                 "mse": mse,
-#                 "rmse": rmse,
-#                 "mae": mae,
-#             }
-
-#             if r2 > best_r2:
-#                 best_r2 = r2
-#                 best_model = name
-
-#             print(f"\n{name} Results:")
-#             print(f"R² Score: {r2:.4f}")
-#             print(f"RMSE: {rmse:.4f}")
-#             print(f"MAE: {mae:.4f}")
-
-#         print(f"\n🏆 Best Model: {best_model} (R² = {best_r2:.4f})")
-
-#         return results
-
-#     # Make predictions
-#     y_pred = model.predict(X_test)
-
-#     # Calculate regression metrics
-#     mse = mean_squared_error(y_test, y_pred)
-#     rmse = np.sqrt(mse)
-#     mae = mean_absolute_error(y_test, y_pred)
-#     r2 = r2_score(y_test, y_pred)
-
-#     # Print results
-#     print("\n" + "=" * 50)
-#     print("PERFORMANCE")
-#     print("=" * 50)
-#     print(f"R² Score: {r2:.4f}")
-#     print(f"Mean Squared Error: {mse:.4f}")
-#     print(f"Root Mean Squared Error: {rmse:.4f}")
-#     print(f"Mean Absolute Error: {mae:.4f}")
-
-#     # if show_feature_importance:
-#     #     # Feature importance (coefficients)
-#     #     feature_importance = pd.DataFrame(
-#     #         {"Feature": X.columns, "Coefficient": model.coef_}
-#     #     ).sort_values("Coefficient", key=abs, ascending=False)
-
-#     #     print(f"\nTop 10 Most Important Features:")
-#     #     print(feature_importance.head(10))
-
-#     return model
-#     # # Return everything for further use
-#     # return {
-#     #     'model': model,
-#     #     'X_train': X_train,
-#     #     'X_test': X_test,
-#     #     'y_train': y_train,
-#     #     'y_test': y_test,
-#     #     'y_pred': y_pred,
-#     #     'metrics': {
-#     #         'r2': r2,
-#     #         'mse': mse,
-#     #         'rmse': rmse,
-#     #         'mae': mae
-#     #     }
-#     # }
+    return results
