@@ -153,18 +153,10 @@ The project implements multiple regression models with the following capabilitie
 
 ## 🔮 Future Enhancements
 
-### Planned Improvements
-
 - Try different models like Random Forest, XGBoost, etc. → tried in the old trial
 - Feature engineering to create new features / drop features that don't contribute much like gender, school type, etc. → tried in the old trial
 - Try transforming the target variable (e.g., log transformation) to see if it improves model performance → tried in the old trial
 - Try regularization techniques like Lasso or Ridge to improve model stability
-
-### Model Interpretability
-
-- Feature importance analysis
-- SHAP values for model explainability
-- Partial dependence plots
 
 ## 📝 Notes
 
