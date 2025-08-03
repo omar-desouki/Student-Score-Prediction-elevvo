@@ -313,10 +313,12 @@ def train_polynomial_regression(
 
     # Define parameter grid for grid search
     if grid_search:
-        param_grid = {"poly__degree": [1, 2, 3, 4, 5]}  # Test degrees 1-5
+        param_grid = {"poly__degree": [1, 2, 3, 4]}  # Test degrees 1-4
 
         if verbose:
-            print(f"🔍 Performing Grid Search for Polynomial Regression...")
+            print(
+                f"🔍 Performing Grid Search for Polynomial Regression... using {os.cpu_count()} cores"
+            )
             print(f"Testing polynomial degrees: {param_grid['poly__degree']}")
 
         grid_search_cv = GridSearchCV(
@@ -324,7 +326,8 @@ def train_polynomial_regression(
             param_grid=param_grid,
             cv=cv_folds,
             scoring="r2",
-            n_jobs=-1,
+            n_jobs=-os.cpu_count(),
+            verbose=2,
         )
 
         grid_search_cv.fit(X_train, y_train)
@@ -431,99 +434,7 @@ def train_polynomial_regression(
                 f"\n⚠️  Warning: High polynomial degree ({best_degree}) may cause overfitting"
             )
 
-        if n_poly_features > 100:
-            print(
-                f"\n⚠️  Warning: Many features created ({n_poly_features}), consider regularization"
-            )
         else:
             print(f"\n✅ Model complexity seems reasonable")
 
     return results
-
-
-# def train_and_evaluate_model(
-#     X,
-#     y,
-#     model_type="compare",
-#     test_size=0.2,
-#     random_state=42,
-#     apply_target_transform=None,
-# ):
-#     """
-#     Train a model and evaluate its performance with optional target transformation
-#     """
-
-#     # Split the data
-#     X_train, X_test, y_train, y_test = train_test_split(
-#         X, y, test_size=test_size, random_state=random_state
-#     )
-
-#     # Handle target transformation
-#     inverse_transform_func = None
-#     y_test_original = y_test.copy()
-
-#     if apply_target_transform:
-#         method = apply_target_transform.get("method")
-#         params = apply_target_transform.get("params", {})
-
-#         if method == "Square Root":
-#             y_train = np.sqrt(y_train)
-#             y_test_transformed = np.sqrt(y_test)
-#             inverse_transform_func = lambda x: x**2
-
-#         elif method == "Log":
-#             min_score = params.get("min_score", y_train.min())
-#             y_train = np.log(y_train + 1 - min_score)
-#             y_test_transformed = np.log(y_test + 1 - min_score)
-#             inverse_transform_func = lambda x: np.exp(x) + min_score - 1
-
-#         print(f"Applied {method} transformation to target")
-
-#     # Define models
-#     models = {
-#         "Linear": LinearRegression(),
-#         "Ridge": Ridge(alpha=1.0, random_state=random_state),
-#         "Random Forest": RandomForestRegressor(
-#             n_estimators=100, random_state=random_state
-#         ),
-#         "XGBoost": XGBRegressor(n_estimators=100, random_state=random_state),
-#     }
-
-#     if model_type != "compare":
-#         models = {model_type: models.get(model_type, LinearRegression())}
-
-#     # Train and evaluate models
-#     best_model_name = None
-#     best_r2 = -float("inf")
-
-#     for name, model in models.items():
-#         model.fit(X_train, y_train)
-#         y_pred = model.predict(X_test)
-
-#         # Calculate metrics on original scale
-#         if inverse_transform_func:
-#             y_pred_original = inverse_transform_func(y_pred)
-#             y_test_eval = y_test_original
-#         else:
-#             y_pred_original = y_pred
-#             y_test_eval = y_test
-
-#         r2 = r2_score(y_test_eval, y_pred_original)
-#         rmse = np.sqrt(mean_squared_error(y_test_eval, y_pred_original))
-#         mae = mean_absolute_error(y_test_eval, y_pred_original)
-
-#         print(f"\n{name} Results:")
-#         print(f"R² Score: {r2:.4f}")
-#         print(f"RMSE: {rmse:.4f}")
-#         print(f"MAE: {mae:.4f}")
-
-#         if r2 > best_r2:
-#             best_r2 = r2
-#             best_model_name = name
-
-#     if model_type == "compare":
-#         print(f"\n🏆 Best Model: {best_model_name} (R² = {best_r2:.4f})")
-#         if inverse_transform_func:
-#             print(
-#                 "📝 Metrics calculated on original scale after inverse transformation"
-#             )
