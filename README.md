@@ -152,10 +152,11 @@ The project implements multiple regression models with the following capabilitie
 - **Cross-Validation**: Robust performance evaluation
 
 ### Model Performance Summary
-| Model | Test R² Score | Description |
-|-------|---------------|-------------|
-| Linear Regression | 0.8931 | Baseline model with good interpretability |
-| Polynomial Regression | 0.9897 | Superior performance capturing non-linear patterns |
+
+| Model                 | Test R² Score | Description                                        |
+| --------------------- | ------------- | -------------------------------------------------- |
+| Linear Regression     | 0.8931        | Baseline model with good interpretability          |
+| Polynomial Regression | 0.9897        | Superior performance capturing non-linear patterns |
 
 ## 🔮 Future Enhancements
 
