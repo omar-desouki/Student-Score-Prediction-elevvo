@@ -25,6 +25,7 @@ Student-Score-Prediction-elevvo/
 
 ## 📈 Dataset Information
 
+Dataset link: https://www.kaggle.com/datasets/lainguyn123/student-performance-factors
 The dataset contains **6,608 student records** with the following features:
 
 ### Numerical Features (6)
